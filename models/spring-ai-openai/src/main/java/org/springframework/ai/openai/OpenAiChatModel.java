@@ -315,17 +315,39 @@ public final class OpenAiChatModel implements ChatModel {
 
 			// Next, aggregate CCCs that deal with tool calls together
 			AtomicBoolean isInsideTool = new AtomicBoolean(false);
-			Flux<ChatCompletion> aggregatedChatCompletions = chunks.doOnNext(chunk -> {
-				if (ChunkMerger.hasToolCall(chunk)) {
-					isInsideTool.set(true);
-				}
-			}).bufferUntil(chunk -> {
-				if (isInsideTool.get() && ChunkMerger.toolCallsDone(chunk)) {
-					isInsideTool.set(false);
-					return true;
-				}
-				return !isInsideTool.get();
-			}).map(ChunkMerger::mergeChunks).map(ChunkMerger::chunkToChatCompletion);
+			// ★ KLD-PATCH: Capture usage from any chunk that carries it (aiproxy may
+			// send usage in choices=[] usage-only chunk OR in the last content chunk).
+			java.util.concurrent.atomic.AtomicReference<CompletionUsage> capturedUsage = new java.util.concurrent.atomic.AtomicReference<>();
+			Flux<ChatCompletion> aggregatedChatCompletions = chunks
+				.doOnNext(chunk -> {
+					if (chunk != null && chunk.usage().isPresent()) {
+						capturedUsage.set(chunk.usage().get());
+					}
+				})
+				// ★ Patch: Filter out choices=[] usage-only chunks that cause ChunkMerger
+				// NSE
+				.filter(chunk -> chunk != null && !chunk.choices().isEmpty())
+				.doOnNext(chunk -> {
+					if (ChunkMerger.hasToolCall(chunk)) {
+						isInsideTool.set(true);
+					}
+				})
+				.bufferUntil(chunk -> {
+					if (isInsideTool.get() && ChunkMerger.toolCallsDone(chunk)) {
+						// ★ KLD-PATCH: GLM-5.2 在带 tool_call delta 的 chunk 上也设置
+						// finishReason=TOOL_CALLS，
+						// 导致 bufferUntil 过早结束，后续 arguments delta chunk 不会被合并。
+						// 修复：如果当前 chunk 仍有 tool_call delta，继续缓冲（不结束）。
+						if (ChunkMerger.hasToolCall(chunk)) {
+							return false;
+						}
+						isInsideTool.set(false);
+						return true;
+					}
+					return !isInsideTool.get();
+				})
+				.map(ChunkMerger::mergeChunks)
+				.map(ChunkMerger::chunkToChatCompletion);
 
 			Flux<ChatResponse> chatResponses = aggregatedChatCompletions.map(chatCompletion -> {
 				String id = chatCompletion.id();
@@ -351,12 +373,36 @@ public final class OpenAiChatModel implements ChatModel {
 					return buildGeneration(choice, metadata, request);
 				}).toList();
 				Optional<CompletionUsage> usage = chatCompletion.usage();
+				// ★ KLD-PATCH: If chatCompletion has no usage, use the captured usage
+				// (from choices=[] chunk or from any chunk that carried usage)
+				if (usage.isEmpty() && capturedUsage.get() != null) {
+					usage = Optional.of(capturedUsage.get());
+				}
 				CompletionUsage usageVal = usage.orElse(null);
 				Usage currentUsage = usageVal != null ? getDefaultUsage(usageVal) : new EmptyUsage();
 				Usage accumulated = UsageCalculator.getCumulativeUsage(currentUsage, null);
 				return new ChatResponse(generations, from(chatCompletion, accumulated));
 
-			});
+			})
+				// ★ KLD-PATCH: After all content chunks, emit a final usage-only
+				// ChatResponse.
+				// The choices=[] usage chunk was filtered out above, so capturedUsage
+				// holds the final usage but it was only injected into the last content
+				// chunk's metadata via the map() above. MessageAggregator's doOnNext only
+				// reads usage from chatResponse.getMetadata().getUsage(), and the last
+				// content chunk does carry it. But to be safe and explicit, we also emit
+				// a final usage-only ChatResponse that MessageAggregator
+				// will pick up via its non-null metadata.getUsage() check.
+				.concatWith(Flux.defer(() -> {
+					CompletionUsage cu = capturedUsage.get();
+					if (cu == null) {
+						return Flux.empty();
+					}
+					Usage finalUsage = getDefaultUsage(cu);
+					ChatResponseMetadata usageMetadata = ChatResponseMetadata.builder().usage(finalUsage).build();
+					ChatResponse usageResponse = new ChatResponse(List.of(), usageMetadata);
+					return Flux.just(usageResponse);
+				}));
 
 			Flux<ChatResponse> observedResponses = chatResponses.doOnError(observation::error)
 				.doFinally(s -> observation.stop())

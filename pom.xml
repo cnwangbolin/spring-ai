@@ -218,12 +218,15 @@
 		<url>https://github.com/spring-projects/spring-ai/actions</url>
 	</ciManagement>
 	<distributionManagement>
+		<repository>
+			<id>maven-releases</id>
+			<name>Nexus Release Repository</name>
+			<url>https://nexus.klxz.cnpc/repository/maven-releases/</url>
+		</repository>
 		<snapshotRepository>
-			<id>spring-snapshots</id>
-			<url>https://repo.spring.io/libs-snapshot-local</url>
-			<releases>
-				<enabled>false</enabled>
-			</releases>
+			<id>maven-snapshots</id>
+			<name>Nexus Snapshots Repository</name>
+			<url>https://nexus.klxz.cnpc/repository/maven-snapshots/</url>
 		</snapshotRepository>
 	</distributionManagement>
 	<licenses>
