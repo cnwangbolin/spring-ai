@@ -331,12 +331,11 @@ public final class OpenAiChatModel implements ChatModel {
 			// ★ KLD-PATCH: Capture usage from any chunk that carries it (aiproxy may
 			// send usage in choices=[] usage-only chunk OR in the last content chunk).
 			java.util.concurrent.atomic.AtomicReference<CompletionUsage> capturedUsage = new java.util.concurrent.atomic.AtomicReference<>();
-			Flux<ChatCompletion> aggregatedChatCompletions = chunks
-				.doOnNext(chunk -> {
-					if (chunk != null && chunk.usage().isPresent()) {
-						capturedUsage.set(chunk.usage().get());
-					}
-				})
+			Flux<ChatCompletion> aggregatedChatCompletions = chunks.doOnNext(chunk -> {
+				if (chunk != null && chunk.usage().isPresent()) {
+					capturedUsage.set(chunk.usage().get());
+				}
+			})
 				// ★ Patch: Filter out choices=[] usage-only chunks that cause ChunkMerger
 				// NSE
 				.filter(chunk -> chunk != null && !chunk.choices().isEmpty())
