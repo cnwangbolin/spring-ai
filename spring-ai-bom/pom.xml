@@ -6,7 +6,7 @@
 
 	<groupId>org.springframework.ai</groupId>
 	<artifactId>spring-ai-bom</artifactId>
-	<version>2.0.2-SNAPSHOT</version>
+	<version>2.0.2</version>
 
 	<packaging>pom</packaging>
 
@@ -55,6 +55,7 @@
 	</scm>
 
 	<properties>
+		<project.build.outputTimestamp>1980-02-01T00:00:00Z</project.build.outputTimestamp>
 		<flatten-maven-plugin.version>1.5.0</flatten-maven-plugin.version>
 	</properties>
 
@@ -553,6 +554,14 @@
 			<dependency>
 				<groupId>org.springframework.ai</groupId>
 				<artifactId>spring-ai-autoconfigure-model-image-observation</artifactId>
+				<version>${project.version}</version>
+			</dependency>
+
+			<!-- Spring AI Audio (text-to-speech, transcription) model observation autoconfiguration -->
+
+			<dependency>
+				<groupId>org.springframework.ai</groupId>
+				<artifactId>spring-ai-autoconfigure-model-audio-observation</artifactId>
 				<version>${project.version}</version>
 			</dependency>
 
