@@ -23,6 +23,7 @@ import io.micrometer.observation.ObservationConvention;
  * Interface for an {@link ObservationConvention} for transcription model exchanges.
  *
  * @author Christian Tzolov
+ * @author Olivier Le Quellec
  * @since 2.0.2
  */
 public interface TranscriptionModelObservationConvention

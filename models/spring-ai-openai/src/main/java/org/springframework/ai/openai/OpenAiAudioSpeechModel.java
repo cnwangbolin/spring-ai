@@ -56,6 +56,7 @@ import org.springframework.ai.openai.http.okhttp.OpenAiHttpClientBuilderCustomiz
 import org.springframework.ai.openai.metadata.OpenAiAudioSpeechResponseMetadata;
 import org.springframework.ai.openai.setup.OpenAiSetup;
 import org.springframework.util.Assert;
+import org.springframework.util.CollectionUtils;
 import org.springframework.util.StringUtils;
 
 /**
@@ -181,8 +182,8 @@ public final class OpenAiAudioSpeechModel implements TextToSpeechModel {
 
 						TextToSpeechResponse response;
 						if (audioBytes.length == 0) {
-							if (logger.isWarnEnabled()) {
-								logger.warn("No speech response returned for prompt: " + prompt);
+							if (logger.isDebugEnabled()) {
+								logger.debug("No speech response returned for prompt: " + prompt);
 							}
 							response = new TextToSpeechResponse(List.of(new Speech(new byte[0])));
 						}
@@ -375,6 +376,10 @@ public final class OpenAiAudioSpeechModel implements TextToSpeechModel {
 
 		if (streaming) {
 			paramsBuilder.streamFormat(SpeechCreateParams.StreamFormat.AUDIO);
+		}
+
+		if (!CollectionUtils.isEmpty(mergedOptions.getCustomHeaders())) {
+			mergedOptions.getCustomHeaders().forEach(paramsBuilder::putAdditionalHeader);
 		}
 
 		return paramsBuilder.build();

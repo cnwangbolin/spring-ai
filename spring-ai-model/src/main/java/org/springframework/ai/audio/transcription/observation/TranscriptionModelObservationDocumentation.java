@@ -27,6 +27,7 @@ import org.springframework.ai.observation.conventions.AiObservationAttributes;
  * Documented conventions for transcription model observations.
  *
  * @author Christian Tzolov
+ * @author Olivier Le Quellec
  * @since 2.0.2
  */
 public enum TranscriptionModelObservationDocumentation implements ObservationDocumentation {

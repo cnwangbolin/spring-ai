@@ -25,6 +25,7 @@ import org.springframework.util.StringUtils;
 /**
  * Default conventions to populate observations for text-to-speech model operations.
  *
+ * @author Olivier Le Quellec
  * @author Christian Tzolov
  * @since 2.0.2
  */

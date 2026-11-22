@@ -26,6 +26,7 @@ import org.springframework.util.StringUtils;
  * Default conventions to populate observations for transcription model operations.
  *
  * @author Christian Tzolov
+ * @author Olivier Le Quellec
  * @since 2.0.2
  */
 public class DefaultTranscriptionModelObservationConvention implements TranscriptionModelObservationConvention {

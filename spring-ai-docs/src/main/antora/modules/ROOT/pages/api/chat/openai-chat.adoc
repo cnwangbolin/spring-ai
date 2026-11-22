@@ -47,6 +47,39 @@ You can also set this configuration programmatically in your application code:
 String apiKey = System.getenv("OPENAI_API_KEY");
 ----
 
+=== Connection Details
+
+The base URL and API key are resolved through a Spring Boot `ConnectionDetails` bean of type `OpenAiConnectionDetails`.
+By default, the bean is backed by the `spring.ai.openai.base-url` and `spring.ai.openai.api-key` properties.
+To develop or test against an OpenAI-compatible model server running in a container (for example via Testcontainers or Docker Compose), declare your own `OpenAiConnectionDetails` bean pointing at the container. It supersedes those two properties, while the model-level overrides such as `spring.ai.openai.chat.base-url` and `spring.ai.openai.chat.api-key` still take precedence.
+
+[source,java]
+----
+@TestConfiguration(proxyBeanMethods = false)
+class OpenAiContainerConfiguration {
+
+    @Bean
+    OpenAiConnectionDetails openAiConnectionDetails(GenericContainer<?> modelServer) {
+        return new OpenAiConnectionDetails() {
+
+            @Override
+            public String getBaseUrl() {
+                return "http://" + modelServer.getHost() + ":" + modelServer.getFirstMappedPort() + "/v1";
+            }
+
+            @Override
+            public String getApiKey() {
+                return "";
+            }
+
+        };
+    }
+
+}
+----
+
+An empty API key disables authentication, which is what most local OpenAI-compatible servers expect.
+
 === Add Repositories and BOM
 
 Spring AI artifacts are published in Maven Central and Spring Snapshot repositories.
@@ -163,7 +196,7 @@ The prefix `spring.ai.openai.chat` is the property prefix that lets you configur
 | spring.ai.openai.chat.api-key   | Optional override for the `spring.ai.openai.api-key` to provide a chat-specific API Key. |  -
 | spring.ai.openai.chat.organization-id | Optionally, you can specify which organization to use for an API request. |  -
 | spring.ai.openai.chat.project-id      | Optionally, you can specify which project to use for an API request. |  -
-| spring.ai.openai.chat.model | Name of the OpenAI chat model to use. You can select between models such as: `gpt-5-mini`, `gpt-4o`, `gpt-4o-mini`, `gpt-4-turbo`, `gpt-3.5-turbo`, and more. See the https://platform.openai.com/docs/models[models] page for more information. | `gpt-5-mini`
+| spring.ai.openai.chat.model | Name of the OpenAI chat model to use. You can select between models such as: `gpt-5-mini`, `gpt-4o`, `gpt-4o-mini`, `gpt-4-turbo`, and more. See the https://platform.openai.com/docs/models[models] page for more information. | `gpt-5-mini`
 | spring.ai.openai.chat.temperature | The sampling temperature to use that controls the apparent creativity of generated completions. Higher values will make output more random while lower values will make results more focused and deterministic. It is not recommended to modify `temperature` and `top_p` for the same completions request as the interaction of these two settings is difficult to predict. | 0.8
 | spring.ai.openai.chat.frequency-penalty | Number between -2.0 and 2.0. Positive values penalize new tokens based on their existing frequency in the text so far, decreasing the model's likelihood to repeat the same line verbatim. | 0.0f
 | spring.ai.openai.chat.logit-bias | Modify the likelihood of specified tokens appearing in the completion. | -
@@ -357,6 +390,10 @@ ChatResponse response = chatModel.call(new Prompt(this.userMessage,
         OpenAiChatOptions.builder().model("gpt-4o").build()));
 ----
 
+The content parts of a user message are sent in the order of its xref:api/chatmodel.adoc#message-parts[message parts], so text and images can interleave.
+A message built with `UserMessage.builder().part(TextPart.of("Look at ")).part(MediaPart.of(image)).part(TextPart.of("this."))` reaches the model as text, image, text.
+Messages built with the constructors or the `text(...)` and `media(...)` setters keep the text-then-media order.
+
 TIP: GPT_4_VISION_PREVIEW will continue to be available only to existing users of this model starting June 17, 2024. If you are not an existing user, please use the GPT_4_O or GPT_4_TURBO models. More details https://platform.openai.com/docs/deprecations/2024-06-06-gpt-4-32k-and-vision-preview-models[here]
 
 or the image URL equivalent using the `gpt-4o` model:
@@ -443,6 +480,38 @@ byte[] waveAudio = response.getResult().getOutput().getMedia().get(0).getDataAsB
 
 You have to specify an `audio` modality in the `OpenAiChatOptions` to generate audio output.
 The `AudioParameters` class provides the voice and audio format for the audio output.
+
+== Message Parts [[message-parts]]
+
+Each choice of a response is a `Generation` whose `AssistantMessage` holds the choice as ordered xref:api/chatmodel.adoc#message-parts[message parts]:
+
+[cols="1,2", stripes=even]
+|====
+| Chat Completions field | Message part
+
+| `reasoning_content` or `reasoning` (OpenAI-compatible servers only) | `ReasoningPart` with the reasoning text and no payload
+| `content` | `TextPart`
+| a `function` tool call | `ToolCallPart`; the extra fields of the tool call, if any, are its `OpaquePayload` (see <<tool-call-additional-properties>>)
+| `audio` | `MediaPart`
+|====
+
+The parts follow that order: reasoning, text, tool calls, audio.
+A choice without content has no `TextPart`, but `getText()` still returns an empty string, as it always has.
+
+When an assistant message is sent back, its parts are folded into a single Chat Completions message, because the API has no way to interleave them:
+
+* the text parts are joined into `content`;
+* the reasoning parts are joined into `reasoning_content`, unless another provider signed some of them (for example Anthropic thinking), in which case no reasoning is sent, or unless the replay is turned off (see <<replay-reasoning-content>>);
+* the `ToolCallPart`s become `tool_calls`, with their extra fields restored;
+* media and any other part are not sent.
+
+NOTE: Reasoning parts without a payload are replayable to any provider, so reasoning that another chat model produced without a signature is sent as `reasoning_content` when the history is replayed to `OpenAiChatModel`.
+An example is the reasoning text of an `OpenAiResponsesChatModel` turn whose reasoning item carries no encrypted content, as an open-weight model such as `gpt-oss` behind a Responses-compatible server returns it.
+If the server you target rejects that field, set `replayReasoningContent` to `false` (see <<replay-reasoning-content>>).
+
+When streaming, the reasoning and text deltas of each chunk are partial parts stamped with a synthesized index, so that `MessageAggregator` rebuilds one `ReasoningPart` and one `TextPart`.
+While a tool call streams, each of its argument deltas arrives right away as a partial `ToolCallPart`, which is only for display and is not a tool call (see xref:api/tools.adoc#streaming-tool-call-arguments[Streaming Tool Call Arguments]).
+Once the model has finished its tool calls, one more chunk carries them as complete `ToolCallPart`s, at the same index as their deltas, and only those are returned by `getToolCalls()`.
 
 == Structured Outputs
 
@@ -661,7 +730,7 @@ Next, create an `OpenAiChatModel` and use it for text generations:
 var chatModel = OpenAiChatModel.builder()
     .options(OpenAiChatOptions.builder()
         .apiKey(System.getenv("OPENAI_API_KEY"))
-        .model("gpt-3.5-turbo")
+        .model("gpt-4o-mini")
         .temperature(0.4)
         .maxTokens(200)
         .build())
@@ -909,7 +978,9 @@ This design provides maximum flexibility for working with diverse OpenAI-compati
 Some OpenAI-compatible servers that support reasoning models (such as DeepSeek R1, vLLM with reasoning parsers) expose the model's internal chain of thought via a `reasoning_content` field in their API responses.
 This field contains the step-by-step reasoning process the model used to arrive at its final answer.
 
-Spring AI maps this field from the JSON response to the `reasoningContent` key in the AssistantMessage metadata.
+Spring AI maps this field to a `ReasoningPart` of the `AssistantMessage`, available through `getReasoning()`.
+The same text is also written to the `reasoningContent` key of the `AssistantMessage` metadata.
+That metadata key is deprecated and will be removed in a future release; new code should read the parts.
 
 [IMPORTANT]
 ====
@@ -920,14 +991,15 @@ Spring AI maps this field from the JSON response to the `reasoningContent` key i
 
 Official OpenAI reasoning models hide the chain-of-thought content when using the Chat Completions API.
 They only expose `reasoning_tokens` count in usage statistics.
-To access actual reasoning text from official OpenAI models, you must use OpenAI's Responses API (a separate endpoint not currently supported by this client).
+To get reasoning summaries from official OpenAI models, use OpenAI's Responses API through xref:api/chat/openai-responses-chat.adoc[`OpenAiResponsesChatModel`].
+That endpoint is also the only one that supports reasoning together with tool calling on GPT-5.4 and later.
 
-**Fallback behavior:** When `reasoning_content` is not provided by the server (e.g., official OpenAI Chat Completions), the `reasoningContent` metadata field will be an empty string.
+**Fallback behavior:** When `reasoning_content` is not provided by the server (e.g., official OpenAI Chat Completions), `getReasoning()` is empty and the deprecated `reasoningContent` metadata field is an empty string.
 ====
 
 ==== Accessing Reasoning Content
 
-When using a compatible server, you can access the reasoning content from the response metadata.
+When using a compatible server, you can access the reasoning content from the message parts.
 
 **Using ChatModel directly:**
 
@@ -941,16 +1013,15 @@ ChatResponse response = chatModel.call(
 // Get the assistant message
 AssistantMessage message = response.getResult().getOutput();
 
-// Access the reasoning content from metadata
-String reasoning = message.getMetadata().get("reasoningContent");
-if (reasoning != null && !reasoning.isEmpty()) {
+// Access the reasoning content from the parts
+for (ReasoningPart reasoning : message.getReasoning()) {
     System.out.println("Model's reasoning process:");
-    System.out.println(reasoning);
+    System.out.println(reasoning.text());
 }
 
-// The final answer is in the regular content
+// The final answer is in the regular text
 System.out.println("\nFinal answer:");
-System.out.println(message.getContent());
+System.out.println(message.getText());
 ----
 
 **Using ChatClient:**
@@ -965,7 +1036,7 @@ String result = chatClient.prompt()
     .chatResponse()
     .getResult()
     .getOutput()
-    .getContent();
+    .getText();
 
 // To access reasoning content with ChatClient, retrieve the full response
 ChatResponse response = chatClient.prompt()
@@ -974,12 +1045,14 @@ ChatResponse response = chatClient.prompt()
     .chatResponse();
 
 AssistantMessage message = response.getResult().getOutput();
-String reasoning = message.getMetadata().get("reasoningContent");
+List<ReasoningPart> reasoning = message.getReasoning();
 ----
+
+When the assistant message is part of the history of a later request, its reasoning parts are sent back as `reasoning_content`, which DeepSeek requires on assistant tool-call messages in thinking mode.
 
 ==== Streaming Reasoning Content
 
-When using streaming responses, reasoning content is accumulated across chunks just like regular message content:
+When streaming, each chunk carries its reasoning delta as a partial `ReasoningPart` and its text delta as a partial `TextPart`, so you can append them as they arrive:
 
 [source,java]
 ----
@@ -993,18 +1066,23 @@ StringBuilder answer = new StringBuilder();
 responseFlux.subscribe(chunk -> {
     AssistantMessage message = chunk.getResult().getOutput();
 
-    // Accumulate reasoning if present
-    String reasoningChunk = message.getMetadata().get("reasoningContent");
-    if (reasoningChunk != null) {
-        reasoning.append(reasoningChunk);
+    // Accumulate the reasoning deltas
+    for (ReasoningPart part : message.getReasoning()) {
+        reasoning.append(part.text());
     }
 
     // Accumulate the final answer
-    if (message.getContent() != null) {
-        answer.append(message.getContent());
-    }
+    answer.append(message.getText());
 });
 ----
+
+The aggregated response produced by `ChatClient` or `MessageAggregator` contains the complete `ReasoningPart` followed by the complete `TextPart`.
+
+[NOTE]
+====
+The deprecated `reasoningContent` metadata key of a streamed chunk holds the reasoning accumulated so far, not the delta, so it must not be appended.
+It is kept for one release so that last-wins metadata aggregation still yields the full text.
+====
 
 ==== Example: DeepSeek R1
 
@@ -1047,9 +1125,9 @@ Not all OpenAI-compatible servers expose reasoning content, even when using reas
 Always refer to your server's API documentation to understand what fields are available in responses.
 ====
 
-==== Replaying Reasoning Content in Multi-Turn Conversations
+==== Replaying Reasoning Content in Multi-Turn Conversations [[replay-reasoning-content]]
 
-When an assistant message that carries `reasoning_content` is included in a subsequent request, Spring AI replays that content as the `reasoning_content` property of the next request.
+When an assistant message that carries reasoning is included in a subsequent request, Spring AI replays that reasoning as the `reasoning_content` property of the next request (see <<message-parts>> for which reasoning parts are replayed).
 Some OpenAI-compatible reasoning endpoints — such as DeepSeek's thinking mode — require this and return HTTP 400 if the property is absent.
 Other endpoints, such as Groq, reject the property outright.
 
@@ -1074,7 +1152,7 @@ OpenAiChatOptions options = OpenAiChatOptions.builder()
 ChatResponse response = chatModel.call(new Prompt(messages, options));
 ----
 
-=== Tool Call Additional Properties for OpenAI-Compatible Providers
+=== Tool Call Additional Properties for OpenAI-Compatible Providers [[tool-call-additional-properties]]
 
 Some OpenAI-compatible providers attach extra fields to tool-call objects in their responses.
 A common example is Google Gemini's OpenAI-compatible endpoint, which returns a `thought_signature` field required for multi-turn tool calling:
@@ -1097,6 +1175,22 @@ Without these provider-specific fields present in the follow-up request, some mo
 
 Spring AI automatically captures any extra fields present on tool-call objects in the provider response and replays them verbatim when the assistant message is included in a subsequent request.
 No configuration is required — the behavior is transparent for both blocking and streaming flows.
+
+The extra fields are stored as a JSON object string in the `OpaquePayload` of the corresponding `ToolCallPart`, with provider `OpenAiChatModel.CHAT_COMPLETIONS_PROVIDER` and kind `OpenAiChatModel.PAYLOAD_TOOL_CALL_ADDITIONAL_PROPERTIES`, so they survive with the message parts:
+
+[source,java]
+----
+AssistantMessage message = response.getResult().getOutput();
+for (MessagePart part : message.getParts()) {
+    if (part instanceof ToolCallPart toolCallPart && toolCallPart.payload() != null
+            && OpenAiChatModel.CHAT_COMPLETIONS_PROVIDER.equals(toolCallPart.payload().provider())) {
+        String extraFields = toolCallPart.payload().data(); // {"extra_content":{"google":{...}}}
+    }
+}
+----
+
+For one release they are also written to the `openai.tool_calls.additional_properties` message metadata key, a map from tool call id to the same JSON string.
+That key is deprecated: on replay the part payload is used first, and the metadata map is only read for a tool call part without that payload, such as one restored from a chat memory written by an earlier version.
 
 [NOTE]
 ====

@@ -117,7 +117,7 @@ public class OpenAiAudioTranscriptionModelIT {
 			.getMetadata();
 		assertThat(metadata.getDuration()).isPositive();
 		assertThat(metadata.getLanguage()).isNotBlank();
-		assertThat(metadata.getUsage()).isNotNull();
+		assertThat(metadata.getNativeUsage()).isNotNull();
 		assertThat(metadata.getSegments()).isNotEmpty();
 		assertThat(metadata.getWords()).isNotEmpty();
 	}
@@ -139,7 +139,7 @@ public class OpenAiAudioTranscriptionModelIT {
 		// The diarized_json format returns duration as of SDK 4.80.0.
 		assertThat(metadata.getDuration()).isPositive();
 		assertThat(metadata.getSegments()).isNotEmpty();
-		assertThat(metadata.getUsage()).isNotNull();
+		assertThat(metadata.getNativeUsage()).isNotNull();
 	}
 
 	@Test

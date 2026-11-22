@@ -29,6 +29,7 @@ import org.springframework.util.Assert;
  * Context used to store metadata for transcription model exchanges.
  *
  * @author Christian Tzolov
+ * @author Olivier Le Quellec
  * @since 2.0.2
  */
 public class TranscriptionModelObservationContext

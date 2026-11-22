@@ -170,6 +170,23 @@ public EmbeddingModel embeddingModel() {
 }
 ----
 
+== Upsert support
+
+`MongoDBAtlasVectorStore` implements `upsert(List<EmbeddedDocument>)`, so you can write documents together with embeddings you computed elsewhere instead of having the store embed them.
+Writing the same id again replaces the whole document, so the content, the metadata and the embedding are replaced and metadata keys you leave out are removed.
+The vector size is read from the vector field of the search index, so the embedding model is not called.
+Atlas stores a vector of the wrong size without complaint, but the search index then skips it, so the document can no longer be found.
+For that reason the store checks the size of every embedding before it writes, and refuses to write at all while it does not know the size because the index cannot be read.
+Once the size is known it is kept, so a later failure to read the index does not stop writes.
+Atlas updates the search index shortly after a write, so a document can take a moment to show up in a search.
+See xref:api/vectordbs.adoc#writing-precomputed-embeddings[Writing User-Supplied Embeddings] for details.
+
+By default each document is saved on its own.
+To reduce the number of database requests for larger batches, set `bulkUpsertBatchSize` on the builder, which writes ordered bulk replacements of at most that many documents.
+Documents are still written in the order given, so the last entry wins when an id repeats, and a failed write leaves the earlier documents in place and skips the later ones.
+An individual write error, such as a duplicate key, is then reported as a `BulkOperationException` rather than a `DuplicateKeyException`.
+A bulk write uses the write concern of the `MongoTemplate` but does not go through a custom `WriteConcernResolver`, so leave this option unset if you rely on one.
+
 == Metadata Filtering
 
 You can leverage the generic, portable xref:api/vectordbs.adoc#metadata-filters[metadata filters] with MongoDB Atlas as well.

@@ -27,6 +27,7 @@ import org.springframework.ai.observation.conventions.AiObservationAttributes;
  * Documented conventions for text-to-speech model observations.
  *
  * @author Christian Tzolov
+ * @author Olivier Le Quellec
  * @since 2.0.2
  */
 public enum TextToSpeechModelObservationDocumentation implements ObservationDocumentation {

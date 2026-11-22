@@ -15,7 +15,7 @@
  */
 
 /**
- * Provides classes for observing transcription model exchanges.
+ * Provides classes for observing audio transcription data.
  */
 @NullMarked
 package org.springframework.ai.audio.transcription.observation;

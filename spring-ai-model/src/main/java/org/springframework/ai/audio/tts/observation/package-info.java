@@ -15,7 +15,7 @@
  */
 
 /**
- * Provides classes for observing text-to-speech model exchanges.
+ * Provides classes for observing text-to-speech data.
  */
 @NullMarked
 package org.springframework.ai.audio.tts.observation;
